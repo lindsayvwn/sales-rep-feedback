@@ -1,0 +1,13 @@
+# Secrets - never commit your API key
+.streamlit/secrets.toml
+
+# Saved feedback
+feedback.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+.DS_Store

@@ -15,6 +15,12 @@ A Streamlit app for a car dealership. Customers rate their sales rep and leave a
 
 A comment goes to manual review when the model returns something outside these labels (`unclear`), or when the stars and label disagree (`helpful` with 1–2 stars, a complaint with 5 stars).
 
+On the owner page, each comment in the review list can be given the correct label or ignored. Either action takes it off the list. Ignored comments still count toward the average rating, but they're left out of the label charts.
+
+## Saving feedback
+
+Streamlit Cloud deletes `feedback.csv` whenever the app restarts. To keep your feedback, open **Download or upload feedback** at the top of the owner page and download a CSV. Upload that file later to restore it, either adding it to the current feedback or replacing it. An uploaded CSV needs a `comment` column, a `rating` column, or both. Any comment without a valid label is labelled by the LLM when you import it.
+
 ## Run locally
 
 1. Put your Groq key in `.streamlit/secrets.toml` (this file is git-ignored).

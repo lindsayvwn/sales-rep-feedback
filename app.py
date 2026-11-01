@@ -13,7 +13,8 @@ URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "openai/gpt-oss-20b"   # check Groq's current free models here: https://console.groq.com/docs/rate-limits
 
 DATA_FILE = "feedback.csv"
-COLUMNS = ["timestamp", "rep", "rating", "comment", "label"]
+# status is "" until the owner reviews a comment, then "reviewed" or "ignored".
+COLUMNS = ["timestamp", "rep", "rating", "comment", "label", "status"]
 
 REPS = ["Alex", "Jordan", "Sam", "Taylor"]
 
@@ -55,17 +56,37 @@ def label_comment(text):
 
 
 def load_data():
-    if os.path.exists(DATA_FILE):
-        return pd.read_csv(DATA_FILE)
-    return pd.DataFrame(columns=COLUMNS)
+    if not os.path.exists(DATA_FILE):
+        return pd.DataFrame(columns=COLUMNS)
+    df = pd.read_csv(DATA_FILE)
+    if "status" not in df.columns:
+        df["status"] = ""
+    df["status"] = df["status"].fillna("")
+    return df
+
+
+def save_data(df):
+    df[COLUMNS].to_csv(DATA_FILE, index=False)
 
 
 def save_row(row):
-    df = pd.concat([load_data(), pd.DataFrame([row])], ignore_index=True)
-    df.to_csv(DATA_FILE, index=False)
+    save_data(pd.concat([load_data(), pd.DataFrame([row])], ignore_index=True))
+
+
+def resolve_review(index, choice):
+    df = load_data()
+    if choice == "ignore":
+        df.loc[index, "status"] = "ignored"
+    else:
+        df.loc[index, "label"] = choice
+        df.loc[index, "status"] = "reviewed"
+    save_data(df)
 
 
 def needs_review(row):
+    # The owner already handled it.
+    if row["status"] in ("reviewed", "ignored"):
+        return False
     # The model didn't return an allowed label.
     if row["label"] == "unclear":
         return True
@@ -76,6 +97,59 @@ def needs_review(row):
         if row["label"] in NEGATIVE and row["rating"] == 5:
             return True
     return False
+
+
+def clean_upload(df):
+    # Needs a comment or rating column; any other missing columns are filled in.
+    df.columns = [c.strip().lower() for c in df.columns]
+    if "comment" not in df.columns and "rating" not in df.columns:
+        raise ValueError("The CSV needs a 'comment' column, a 'rating' column, or both.")
+    for col in COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+    df["comment"] = df["comment"].fillna("").astype(str).str.strip()
+    df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
+    df["rep"] = df["rep"].fillna("").replace("", "Unknown")
+    df["status"] = df["status"].fillna("")
+    df["label"] = df["label"].fillna("").astype(str).str.strip().str.lower()
+    df = df[(df["comment"] != "") | df["rating"].notna()].reset_index(drop=True)
+
+    # Label any comment that doesn't already have a valid label.
+    known = ALLOWED + ["unclear", "no comment"]
+    for i, row in df.iterrows():
+        if row["comment"] == "":
+            df.loc[i, "label"] = "no comment"
+        elif row["label"] not in known:
+            df.loc[i, "label"] = label_comment(row["comment"])
+    return df[COLUMNS]
+
+
+def data_tools(df):
+    with st.expander("Download or upload feedback"):
+        st.download_button(
+            "Download feedback as CSV",
+            df[COLUMNS].to_csv(index=False),
+            file_name="feedback.csv",
+            mime="text/csv",
+            disabled=df.empty,
+        )
+
+        st.divider()
+        upload = st.file_uploader("Upload a feedback CSV", type="csv")
+        mode = st.radio("What should the upload do?",
+                        ["Add to current feedback", "Replace current feedback"])
+        st.caption("Comments without a label are labelled by the LLM when you import.")
+        if upload is not None and st.button("Import"):
+            try:
+                with st.spinner("Importing..."):
+                    new = clean_upload(pd.read_csv(upload))
+            except Exception as e:
+                st.error(f"Couldn't import that file: {e}")
+                return
+            if mode == "Add to current feedback":
+                new = pd.concat([df, new], ignore_index=True)
+            save_data(new)
+            st.rerun()
 
 
 def customer_page():
@@ -102,6 +176,7 @@ def customer_page():
                 "rating": rating,
                 "comment": comment,
                 "label": label,
+                "status": "",
             })
         st.success("Thanks for your feedback!")
 
@@ -111,12 +186,14 @@ def owner_page():
     st.caption("Which sales-rep behaviors should we coach on to raise customer ratings?")
 
     df = load_data()
+    data_tools(df)
     if df.empty:
         st.info("No feedback yet.")
         return
 
     df["needs_review"] = df.apply(needs_review, axis=1)
-    comments = df[df["label"] != "no comment"]
+    # Ignored comments still count toward the average rating, but not the label charts.
+    comments = df[(df["label"] != "no comment") & (df["status"] != "ignored")]
     complaints = comments[comments["label"].isin(NEGATIVE)]
     review = df[df["needs_review"]]
 
@@ -137,11 +214,18 @@ def owner_page():
     st.subheader("Comments that need manual review")
     if review.empty:
         st.write("Nothing to review.")
-    for _, row in review.iterrows():
+    options = ALLOWED + ["ignore"]
+    for i, row in review.iterrows():
         with st.container(border=True):
             rating = f"{int(row['rating'])} ★" if pd.notna(row["rating"]) else "no rating"
             st.markdown(f"**{row['rep']}** · {rating} · label: `{row['label']}` · {row['timestamp']}")
             st.write(row["comment"] if pd.notna(row["comment"]) else "")
+            pick, button = st.columns([3, 1], vertical_alignment="bottom")
+            default = options.index(row["label"]) if row["label"] in options else 0
+            choice = pick.selectbox("Set label", options, index=default, key=f"choice_{i}")
+            if button.button("Save", key=f"save_{i}"):
+                resolve_review(i, choice)
+                st.rerun()
 
     with st.expander("Label definitions"):
         for name, desc in LABELS.items():

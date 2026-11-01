@@ -6,16 +6,19 @@ A Streamlit app for a car dealership. Customers rate their sales rep and leave a
 
 ## Labels
 
+Each label is a topic: what the comment is mainly about, whether it's good or bad. The star rating shows whether the customer was happy, so the owner page compares average stars across topics. The lowest-rated topics are the behaviors to coach on.
+
 | Label | Definition |
 |---|---|
-| helpful | The rep was knowledgeable, friendly, or helped the customer find the right car. |
-| pushy | The rep used high-pressure tactics, rushed the customer, or pushed add-ons they didn't want. |
-| communication | The rep was slow to respond, didn't follow up, didn't listen, or was hard to reach. |
-| pricing | The rep was unclear or misleading about price, fees, trade-in value, or financing. |
+| efficiency | How quickly and smoothly the visit went: wait times, paperwork, and getting the deal done. |
+| pressure | Whether the rep pushed, rushed, or upsold the customer, or respected what they asked for. |
+| honesty | Whether the rep was clear and truthful about price, fees, trade-in, financing, or the car's condition. |
+| knowledge | How well the rep knew the car, its features, and the options available. |
+| communication | How well the rep listened, replied to messages, followed up, and stayed easy to reach. |
 
-A comment goes to manual review when the model returns something outside these labels (`unclear`), or when the stars and label disagree (`helpful` with 1–2 stars, a complaint with 5 stars).
+If a comment mentions several topics, it gets the one the customer complains about most. A comment goes to manual review when it doesn't fit any topic (`unclear`, e.g. "Great guy!"), or when it has a label from an older version of the app.
 
-On the owner page, each comment in the review list can be given the correct label or ignored. Either action takes it off the list. Ignored comments still count toward the average rating, but they're left out of the label charts.
+On the owner page, each comment in the review list can be given the correct label or ignored. Either action takes it off the list. Ignored comments still count toward the average rating, but they're left out of the topic charts.
 
 ## Saving feedback
 

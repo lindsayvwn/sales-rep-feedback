@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 
+import altair as alt
 import pandas as pd
 import requests
 import streamlit as st
@@ -18,25 +19,27 @@ COLUMNS = ["timestamp", "rep", "rating", "comment", "label", "status"]
 
 REPS = ["Alex", "Jordan", "Sam", "Taylor"]
 
-# One line per label: what the comment is mainly about.
+# Labels are topics: what the comment is mainly about, good or bad.
+# The star rating shows whether the customer was happy with it.
 LABELS = {
-    "helpful": "The rep was knowledgeable, friendly, or helped the customer find the right car.",
-    "pushy": "The rep used high-pressure tactics, rushed the customer, or pushed add-ons they didn't want.",
-    "communication": "The rep was slow to respond, didn't follow up, didn't listen, or was hard to reach.",
-    "pricing": "The rep was unclear or misleading about price, fees, trade-in value, or financing.",
+    "efficiency": "How quickly and smoothly the visit went: wait times, paperwork, and getting the deal done.",
+    "pressure": "Whether the rep pushed, rushed, or upsold the customer, or respected what they asked for.",
+    "honesty": "Whether the rep was clear and truthful about price, fees, trade-in, financing, or the car's condition.",
+    "knowledge": "How well the rep knew the car, its features, and the options available.",
+    "communication": "How well the rep listened, replied to messages, followed up, and stayed easy to reach.",
 }
 ALLOWED = list(LABELS)
-NEGATIVE = ["pushy", "communication", "pricing"]
 
 
 def label_comment(text):
     definitions = "\n".join(f"- {name}: {desc}" for name, desc in LABELS.items())
     prompt = (
         "You label customer comments about sales reps at a car dealership.\n"
-        f"Label the comment with exactly one word from this list: {', '.join(ALLOWED)}.\n\n"
+        "Label the comment by the topic it is mainly about, whether the comment is positive or negative.\n"
+        f"Reply with exactly one word from this list: {', '.join(ALLOWED)}.\n\n"
         f"Definitions:\n{definitions}\n\n"
-        "If it has praise and a complaint, label by the bigger problem.\n"
-        "Sarcasm counts as a complaint.\n"
+        "If it mentions several topics, pick the one the customer complains about most.\n"
+        "If it doesn't fit any topic, reply: unclear\n"
         "Reply with the one word only.\n\n"
         f"Comment: {text}"
     )
@@ -87,16 +90,8 @@ def needs_review(row):
     # The owner already handled it.
     if row["status"] in ("reviewed", "ignored"):
         return False
-    # The model didn't return an allowed label.
-    if row["label"] == "unclear":
-        return True
-    # The star rating and the label disagree.
-    if pd.notna(row["rating"]):
-        if row["label"] == "helpful" and row["rating"] <= 2:
-            return True
-        if row["label"] in NEGATIVE and row["rating"] == 5:
-            return True
-    return False
+    # The comment isn't one of the topics: "unclear", or a label from an older version of the app.
+    return row["label"] not in ALLOWED and row["label"] != "no comment"
 
 
 def clean_upload(df):
@@ -181,6 +176,15 @@ def customer_page():
         st.success("Thanks for your feedback!")
 
 
+def topic_chart(data, value, title, scale, axis):
+    # Horizontal bars so topic names stay readable, always in the same order.
+    return alt.Chart(data).mark_bar().encode(
+        x=alt.X(f"{value}:Q", title=title, scale=scale, axis=axis),
+        y=alt.Y("label:N", title=None, sort=ALLOWED),
+        tooltip=["label", value],
+    )
+
+
 def owner_page():
     st.title("Sales rep coaching dashboard")
     st.caption("Which sales-rep behaviors should we coach on to raise customer ratings?")
@@ -192,24 +196,32 @@ def owner_page():
         return
 
     df["needs_review"] = df.apply(needs_review, axis=1)
-    # Ignored comments still count toward the average rating, but not the label charts.
-    comments = df[(df["label"] != "no comment") & (df["status"] != "ignored")]
-    complaints = comments[comments["label"].isin(NEGATIVE)]
     review = df[df["needs_review"]]
+    # Ignored comments still count toward the average rating, but not the topic charts.
+    topics = df[df["label"].isin(ALLOWED) & (df["status"] != "ignored")]
+    stars = topics.dropna(subset=["rating"]).groupby("label")["rating"].mean().round(1)
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Average rating", f"{df['rating'].mean():.1f} ★" if df["rating"].notna().any() else "–")
-    col2.metric("Top complaint", complaints["label"].mode()[0] if not complaints.empty else "–")
+    if stars.empty:
+        col2.metric("Lowest-rated topic", "–")
+    else:
+        col2.metric("Lowest-rated topic", stars.idxmin(), f"{stars.min():.1f} ★ average",
+                    delta_color="off", delta_arrow="off")
     col3.metric("Need manual review", len(review))
 
     st.subheader("What customers talk about")
-    st.bar_chart(comments["label"].value_counts())
+    counts = topics["label"].value_counts().reindex(ALLOWED, fill_value=0).rename_axis("label").reset_index(name="count")
+    st.altair_chart(topic_chart(counts, "count", "Comments", alt.Scale(domainMin=0),
+                                alt.Axis(tickMinStep=1, format="d")))
 
-    st.subheader("Complaints by rep")
-    if complaints.empty:
-        st.write("No complaints yet.")
+    st.subheader("Average stars by topic")
+    st.caption("Low bars are the behaviors to coach on.")
+    if stars.empty:
+        st.write("No rated comments yet.")
     else:
-        st.bar_chart(pd.crosstab(complaints["rep"], complaints["label"]))
+        st.altair_chart(topic_chart(stars.reset_index(name="stars"), "stars", "Average stars",
+                                    alt.Scale(domain=[0, 5]), alt.Axis(values=[0, 1, 2, 3, 4, 5])))
 
     st.subheader("Comments that need manual review")
     if review.empty:

@@ -149,12 +149,13 @@ def data_tools(df):
 
 def customer_page():
     st.title("Rate your sales rep")
-    st.write("Tell us how your visit went. Leave a star rating, a comment, or both.")
+    st.write("Tell us how your visit went. Leave a star rating, a comment, or both — at least one is required.")
 
     with st.form("feedback", clear_on_submit=True):
         rep = st.selectbox("Who helped you?", REPS)
+        st.markdown("Star rating")
         stars = st.feedback("stars")
-        comment = st.text_area("Comments (optional)")
+        comment = st.text_area("Comment")
         submitted = st.form_submit_button("Submit")
 
     if submitted:
